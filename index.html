@@ -49,7 +49,7 @@
 <body>
 
 <h1>Color Vote Game</h1>
-<p class="description">Real time voting / Bar chart and graph / Left click to increase, Right click to decrease</p>
+<p class="description">Real-time voting / Global sync / Left-click = +vote, Right-click = -vote (5s cooldown)</p>
 
 <div class="colors" id="colorButtons"></div>
 
@@ -66,11 +66,18 @@
   <canvas id="growthChart"></canvas>
 </div>
 
+<script src="/socket.io/socket.io.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
 /* ================================================
-   CONFIG
+   SOCKET.IO CONNECTION
+================================================ */
+
+const socket = io();
+
+/* ================================================
+   GAME CONFIG
 ================================================ */
 
 const colorNames = ["red","blue","green","yellow","purple","orange","cyan","pink","white","black"];
@@ -95,74 +102,94 @@ let points = Array(10).fill(0);
 let lastClick = Array(10).fill(0);
 const COOLDOWN = 5000;
 
-/* Growth history for PPM graph */
-const history = colorNames.map(() => []);
+/* For PPM graph */
+const history = colorNames.map(()=>[]);
 
-/* DOM elements */
+/* DOM references */
 const btnContainer = document.getElementById("colorButtons");
 const totalPointsEl = document.getElementById("totalPoints");
 const totalVotesEl = document.getElementById("totalVotes");
 
 /* ================================================
-   BUTTON CREATION
+   RECEIVE DATA FROM SERVER
+================================================ */
+
+socket.on("init", serverData => {
+  votes = serverData.votes;
+  points = serverData.points;
+  updateAll();
+});
+
+socket.on("sync", serverData => {
+  votes = serverData.votes;
+  points = serverData.points;
+  updateAll();
+});
+
+/* Send updated values to server */
+function sendUpdate(){
+  socket.emit("update", { votes, points });
+}
+
+/* ================================================
+   BUTTONS
 ================================================ */
 
 colorNames.forEach((c,i)=>{
-  let b = document.createElement("button");
-  b.style.background = colors[c];
-  b.textContent = labels[i];
-  b.title = "Left = +vote, Right = -vote (5s cooldown)";
+  const btn = document.createElement("button");
+  btn.style.background = colors[c];
+  btn.textContent = labels[i];
 
-  b.addEventListener("click", () => {
+  btn.addEventListener("click", ()=>{
     if(Date.now() - lastClick[i] >= COOLDOWN){
       votes[i]++;
       lastClick[i] = Date.now();
+      sendUpdate();
       updateAll();
     }
   });
 
-  b.addEventListener("contextmenu", e => {
+  btn.addEventListener("contextmenu", e=>{
     e.preventDefault();
     if(Date.now() - lastClick[i] >= COOLDOWN){
       votes[i]--;
       lastClick[i] = Date.now();
+      sendUpdate();
       updateAll();
     }
   });
 
-  btnContainer.appendChild(b);
+  btnContainer.appendChild(btn);
 });
 
 /* ================================================
-   POINTS BAR CHART
+   BAR CHART
 ================================================ */
 
 const pointsChart = new Chart(document.getElementById("pointsChart"), {
   type: "bar",
   data: {
-    labels: labels,
+    labels,
     datasets: [{
       data: points,
-      backgroundColor: colorNames.map(c => colors[c]),
+      backgroundColor: colorNames.map(c=>colors[c]),
       borderRadius: 6
     }]
   },
-  options: {
-    indexAxis: "y",
-    animation: false,
-    maintainAspectRatio: false,
-    scales: {
-      x: { beginAtZero: true, ticks:{color:"white"}},
-      y: { ticks:{color:"white"} }
+  options:{
+    indexAxis:"y",
+    animation:false,
+    maintainAspectRatio:false,
+    scales:{
+      x:{ beginAtZero:true, ticks:{color:"white"}},
+      y:{ ticks:{color:"white"}}
     },
-    plugins: {
-      legend: { display: false }
-    }
+    plugins:{ legend:{ display:false }}
   }
 });
 
 /* ================================================
-   POINTS PER MINUTE GRAPH
+   PPM GROWTH CHART
 ================================================ */
 
 const growthChart = new Chart(document.getElementById("growthChart"), {
@@ -177,13 +204,15 @@ const growthChart = new Chart(document.getElementById("growthChart"), {
       fill: false,
       tension: 0.3,
       pointRadius: 0,
-      borderWidth: 1
+      borderWidth: 3
     }))
   },
   options:{
     animation:false,
     maintainAspectRatio:false,
-    plugins:{ legend:{ display:false }},
+    plugins:{
+      legend:{ display:false }
+    },
     scales:{
       x:{ ticks:{color:"white"} },
       y:{ ticks:{color:"white"} }
@@ -192,17 +221,18 @@ const growthChart = new Chart(document.getElementById("growthChart"), {
 });
 
 /* ================================================
-   UPDATE FUNCTION
+   UPDATE ALL VISUALS
 ================================================ */
 
 function updateAll(){
   totalPointsEl.textContent = points.reduce((a,b)=>a+b,0);
   totalVotesEl.textContent = votes.reduce((a,b)=>a+b,0);
 
-  // Update bar chart
   pointsChart.data.datasets[0].data = points;
+
   const maxAbs = Math.max(...points.map(v=>Math.abs(v))) || 10;
   pointsChart.options.scales.x.max = maxAbs * 1.2;
+
   pointsChart.update("none");
 }
 
@@ -212,15 +242,16 @@ function updateAll(){
 
 setInterval(()=>{
   for(let i=0;i<10;i++){
-    const amount = Math.floor(Math.random()*(Math.abs(votes[i])+5));
-    points[i] += votes[i] >= 0 ? amount : -amount;
+    const gain = Math.floor(Math.random()*(Math.abs(votes[i])+5));
+    points[i] += votes[i] >= 0 ? gain : -gain;
   }
+  sendUpdate();
   updatePPM();
   updateAll();
 },1000);
 
 /* ================================================
-   AUTO VOTE DECAY
+   AUTO DECAY EVERY 20S
 ================================================ */
 
 setInterval(()=>{
@@ -228,16 +259,18 @@ setInterval(()=>{
     if(votes[i] > 0) votes[i]--;
     else if(votes[i] < 0) votes[i]++;
   }
+  sendUpdate();
   updateAll();
 },20000);
 
 /* ================================================
-   POINTS PER MINUTE UPDATE
+   UPDATE PPM GRAPH
 ================================================ */
 
 function updatePPM(){
-  const timeLabel = new Date().toLocaleTimeString().slice(3,8);
-  growthChart.data.labels.push(timeLabel);
+  const time = new Date().toLocaleTimeString().slice(3,8);
+
+  growthChart.data.labels.push(time);
   if(growthChart.data.labels.length > 3600)
     growthChart.data.labels.shift();
 
@@ -262,3 +295,4 @@ updateAll();
 </script>
 </body>
 </html>
+
