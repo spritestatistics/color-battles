@@ -34,7 +34,7 @@ io.on("connection", socket => {
 // SERVER-SIDE POINT GENERATION
 setInterval(() => {
   for (let i = 0; i < 10; i++) {
-    const amount = Math.floor(Math.random() * (Math.abs(data.votes[i]) + 5));
+    const amount = Math.floor(Math.random() * (Math.abs(data.votes[i]) + 8));
     data.points[i] += data.votes[i] >= 0 ? amount : -amount;
   }
 }, 1000);
@@ -82,4 +82,5 @@ const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
   console.log("✅ SERVER RUNNING ON PORT", PORT);
 });
+
 
