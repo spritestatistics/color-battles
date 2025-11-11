@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Color Battles! — Global Multiplayer</title>
+<title>Color Battles! - Bosmium</title>
+
 <style>
   body {
     background: #111;
@@ -48,9 +49,10 @@
   .hint { color: #bbb; font-size: 13px; margin-top: 8px; }
 </style>
 </head>
+
 <body>
-<h1>Color Battles!</h1>
-<p class="description">Real-time voting / Bar chart & Growth graph / Left click to add vote, Right click to remove vote (5s cooldown)</p>
+<h1>Color Vote Game</h1>
+<p class="description">Real time voting / Bar chart and graph / Left click to increase a color's vote and Right click to decrease a color's vote</p>
 
 <div class="colors" id="colorButtons"></div>
 
@@ -59,21 +61,22 @@
 </div>
 
 <div class="chart-wrap">
-  <canvas id="pointsChart" style="width:100%; height:100%;"></canvas>
+  <canvas id="pointsChart"></canvas>
 </div>
 
 <div class="chart-wrap">
-  <canvas id="growthChart" style="width:100%; height:100%;"></canvas>
+  <canvas id="growthChart"></canvas>
 </div>
 
 <div class="hint">Vote more!</div>
 
-<script src="/socket.io/socket.io.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 
 <script>
-const socket = io();
+////////////////////////////////////////////////////
+// INITIAL SETUP
+////////////////////////////////////////////////////
 
 const colorNames = ["red","blue","green","yellow","purple","orange","cyan","pink","white","black"];
 const colorLabels = colorNames.map(c => c.charAt(0).toUpperCase() + c.slice(1));
@@ -81,7 +84,7 @@ const colorLabels = colorNames.map(c => c.charAt(0).toUpperCase() + c.slice(1));
 const votes = new Array(colorNames.length).fill(0);
 const points = new Array(colorNames.length).fill(0);
 const lastClickTime = new Array(colorNames.length).fill(0);
-const COOLDOWN = 5*1000;
+const COOLDOWN = 5 * 1000;
 
 const colorButtons = document.getElementById('colorButtons');
 const totalPointsEl = document.getElementById('totalPoints');
@@ -105,17 +108,22 @@ const barColors = {
 
 Chart.register(ChartDataLabels);
 
-// Create buttons
+////////////////////////////////////////////////////
+// BUTTONS
+////////////////////////////////////////////////////
+
 colorNames.forEach((c,i)=>{
   const btn = document.createElement('button');
   btn.style.background = barColors[c] || c;
   btn.textContent = colorLabels[i];
+  btn.title = 'Left-click: +1 vote | Right-click: -1 vote (5s cooldown)';
 
   btn.addEventListener('click', ()=>{
     const now = Date.now();
     if(now - lastClickTime[i] >= COOLDOWN){
+      votes[i]++;
       lastClickTime[i] = now;
-      socket.emit('vote', {index:i, delta:1});
+      updateAll();
     }
   });
 
@@ -123,15 +131,19 @@ colorNames.forEach((c,i)=>{
     e.preventDefault();
     const now = Date.now();
     if(now - lastClickTime[i] >= COOLDOWN){
+      votes[i]--;
       lastClickTime[i] = now;
-      socket.emit('vote', {index:i, delta:-1});
+      updateAll();
     }
   });
 
   colorButtons.appendChild(btn);
 });
 
-// Bar Chart
+////////////////////////////////////////////////////
+// BAR CHART
+////////////////////////////////////////////////////
+
 const pointsChart = new Chart(ctxPoints,{
   type:'bar',
   data:{
@@ -179,7 +191,10 @@ const pointsChart = new Chart(ctxPoints,{
   }
 });
 
-// Growth line chart (no labels or fill)
+////////////////////////////////////////////////////
+// GROWTH CHART (Points per minute, updates every second)
+////////////////////////////////////////////////////
+
 const growthData = {
   labels: [],
   datasets: colorNames.map((c,i)=>({
@@ -195,46 +210,94 @@ const growthData = {
 
 const growthChart = new Chart(ctxGrowth,{
   type:'line',
-  data:growthData,
+  data: growthData,
   options:{
     animation:false,
     maintainAspectRatio:false,
     responsive:true,
-    plugins:{legend:{display:false}, datalabels:{display:false}},
-    scales:{x:{ticks:{color:'#ddd'},grid:{color:'rgba(255,255,255,0.04)'}}, y:{ticks:{color:'#ddd'},grid:{color:'rgba(255,255,255,0.04)'}}}
+    plugins:{
+      legend:{display:false},
+      datalabels:{display:false}
+    },
+    scales:{
+      x:{ ticks:{color:'#ddd'}, grid:{color:'rgba(255,255,255,0.04)'} },
+      y:{ ticks:{color:'#ddd'}, grid:{color:'rgba(255,255,255,0.04)'} }
+    }
   }
 });
 
-// Update charts
+////////////////////////////////////////////////////
+// UPDATE DISPLAY
+////////////////////////////////////////////////////
+
 function updateAll(){
   const totalVotesVal = votes.reduce((a,b)=>a+b,0);
   const totalPointsVal = points.reduce((a,b)=>a+b,0);
+
   totalVotesEl.textContent = totalVotesVal;
   totalPointsEl.textContent = totalPointsVal;
 
   pointsChart.data.datasets[0].data = points;
-  const maxPoints = Math.max(...points.map(p=>Math.abs(p)));
-  pointsChart.options.scales.x.max = maxPoints > 0 ? maxPoints*1.225 : 10;
+
+  const maxPoints = Math.max(...points.map(p => Math.abs(p)));
+  pointsChart.options.scales.x.max = maxPoints>0 ? maxPoints*1.225 : 10;
+
   pointsChart.update('none');
-
-  const now = new Date();
-  const label = now.toLocaleTimeString().slice(3,8);
-  growthData.labels.push(label);
-  if(growthData.labels.length>3600) growthData.labels.shift();
-
-  growthData.datasets.forEach((ds,i)=>{
-    ds.data.push(points[i]);
-    if(ds.data.length>3600) ds.data.shift();
-  });
-  growthChart.update('none');
 }
 
-// Listen for server updates
-socket.on('update', data => {
-  data.votes.forEach((v,i)=>votes[i]=v);
-  data.points.forEach((p,i)=>points[i]=p);
+////////////////////////////////////////////////////
+// POINT SYSTEM TICK
+////////////////////////////////////////////////////
+
+// Update points every second
+setInterval(()=>{
+  for(let i=0;i<colorNames.length;i++){
+    const delta = Math.floor(Math.random()*(Math.abs(votes[i])+5));
+    points[i] += votes[i]>=0 ? delta : -delta;
+  }
   updateAll();
-});
+},1000);
+
+// Decay votes every 20 seconds
+setInterval(()=>{
+  for(let i=0;i<colorNames.length;i++){
+    if(votes[i] > 0) votes[i]--;
+    else if(votes[i] < 0) votes[i]++;
+  }
+  updateAll();
+},20000);
+
+////////////////////////////////////////////////////
+// ✅ POINTS-PER-MINUTE GRAPH (updates every second)
+////////////////////////////////////////////////////
+
+// 60-second rolling history for each color
+const history = colorNames.map(() => []);
+
+setInterval(() => {
+
+  const now = new Date();
+  const label = now.toLocaleTimeString().slice(3, 8);
+
+  growthData.labels.push(label);
+  if (growthData.labels.length > 3600) growthData.labels.shift();
+
+  growthData.datasets.forEach((ds, i) => {
+
+    history[i].push(points[i]);
+    if (history[i].length > 60) history[i].shift();
+
+    let ppm = 0;
+    if (history[i].length === 60) {
+      ppm = points[i] - history[i][0];
+    }
+
+    ds.data.push(ppm);
+    if (ds.data.length > 3600) ds.data.shift();
+  });
+
+  growthChart.update('none');
+}, 1000);
 
 updateAll();
 </script>
