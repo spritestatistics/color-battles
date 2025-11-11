@@ -1,85 +1,53 @@
-// server.js
-const fs = require('fs');
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-
+const fs = require("fs");
+const express = require("express");
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
+const http = require("http").createServer(app);
+const io = require("socket.io")(http, { cors: { origin: "*" } });
 
-app.use(express.static('public')); // serve HTML/JS
+const DATA_FILE = "data.json";
 
-const colorNames = ["red","blue","green","yellow","purple","orange","cyan","pink","white","black"];
-let votes = Array(colorNames.length).fill(0);
-let points = Array(colorNames.length).fill(0);
-
-const SAVE_FILE = 'data.json';
-
-// ✅ Load saved data if exists
-function loadData() {
-  if (fs.existsSync(SAVE_FILE)) {
-    try {
-      const saved = JSON.parse(fs.readFileSync(SAVE_FILE, 'utf8'));
-      if (saved.votes && saved.points) {
-        votes = saved.votes;
-        points = saved.points;
-        console.log("✅ Loaded saved data");
-      }
-    } catch (err) {
-      console.log("❌ Error loading save file:", err);
-    }
-  } else {
-    console.log("ℹ️ No save file found, starting fresh.");
-  }
+// Load or create data file
+let data;
+try {
+  data = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+} catch {
+  data = { 
+    points: Array(10).fill(0),
+    votes:  Array(10).fill(0)
+  };
+  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-// ✅ Save data to file
-function saveData() {
-  const data = JSON.stringify({ votes, points });
-  fs.writeFile(SAVE_FILE, data, err => {
-    if (err) console.error("❌ Error saving data:", err);
+// Auto-save to file every 5 seconds
+setInterval(() => {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+}, 5000);
+
+// Serve static files (your index.html)
+app.use(express.static(__dirname));
+
+io.on("connection", socket => {
+  console.log("✅ A user connected:", socket.id);
+
+  // Send current data to new user
+  socket.emit("init", data);
+
+  // When client updates votes or points
+  socket.on("update", updated => {
+    data.points = updated.points;
+    data.votes  = updated.votes;
+
+    // Broadcast to all clients
+    socket.broadcast.emit("sync", data);
   });
-}
 
-// Load on boot
-loadData();
-
-// ✅ Update points every second
-setInterval(() => {
-  for (let i = 0; i < colorNames.length; i++) {
-    const delta = Math.floor(Math.random() * (Math.abs(votes[i]) + 5));
-    points[i] += votes[i] >= 0 ? delta : -delta;
-  }
-  io.emit('update', { votes, points });
-
-  saveData(); // ✅ auto-save
-}, 1000);
-
-// ✅ Vote decay every 20 seconds
-setInterval(() => {
-  for (let i = 0; i < colorNames.length; i++) {
-    if (votes[i] > 0) votes[i]--;
-    else if (votes[i] < 0) votes[i]++;
-  }
-  io.emit('update', { votes, points });
-
-  saveData(); // ✅ auto-save
-}, 20000);
-
-io.on('connection', socket => {
-  socket.emit('update', { votes, points });
-
-  socket.on('vote', ({ index, delta }) => {
-    votes[index] += delta;
-    io.emit('update', { votes, points });
-
-    saveData(); // ✅ Save on vote change
+  socket.on("disconnect", () => {
+    console.log("❌ User disconnected:", socket.id);
   });
 });
 
-// ✅ Save every 5 seconds (extra safety)
-setInterval(saveData, 5000);
-
-server.listen(3000, () => console.log('✅ Server running on port 3000'));
-
+// Start server
+const PORT = process.env.PORT || 3000;
+http.listen(PORT, () => {
+  console.log("✅ Server running on port", PORT);
+});
