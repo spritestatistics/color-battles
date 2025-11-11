@@ -242,7 +242,7 @@ function updateAll(){
 
 setInterval(()=>{
   for(let i=0;i<10;i++){
-    const gain = Math.floor(Math.random()*(Math.abs(votes[i])+5));
+    const gain = Math.floor(Math.random()*(Math.abs(votes[i])+10));
     points[i] += votes[i] >= 0 ? gain : -gain;
   }
   sendUpdate();
