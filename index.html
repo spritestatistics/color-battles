@@ -228,7 +228,8 @@ const growthChart = new Chart(document.getElementById("growthChart"), {
     animation:false,
     maintainAspectRatio:false,
     plugins:{
-      legend:{ display:false }
+      legend:{ display:false },
+      datalabels: { display: false }   // ✅ TURN OFF LABELS FOR THIS CHART
     },
     scales:{
       x:{ ticks:{color:"white"} },
