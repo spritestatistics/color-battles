@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Color Battles! — Global Multiplayer</title>
+<style>
+  body {
+    background: #111;
+    color: white;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    text-align: center;
+    margin: 12px;
+  }
+  h1 { margin-bottom: 6px; }
+  p.description { color: #ddd; margin-top: 0; margin-bottom: 14px; font-size: 14px; }
+  .colors {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    max-width: 900px;
+    margin: 0 auto 18px auto;
+  }
+  .colors button {
+    padding: 16px;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 700;
+    border-radius: 8px;
+    box-shadow: 0 2px 0 rgba(0,0,0,0.25) inset;
+    user-select: none;
+    color: #fff;
+  }
+  #statsTop {
+    margin: 10px auto;
+    font-size: 16px;
+    color: #eee;
+  }
+  .chart-wrap {
+    max-width: 900px;
+    height: 520px;
+    margin: 18px auto 40px auto;
+    background: rgba(255,255,255,0.02);
+    padding: 12px;
+    border-radius: 10px;
+  }
+  .hint { color: #bbb; font-size: 13px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>Color Battles!</h1>
+<p class="description">Real-time voting / Bar chart & Growth graph / Left click to add vote, Right click to remove vote (5s cooldown)</p>
+
+<div class="colors" id="colorButtons"></div>
+
+<div id="statsTop">
+  Total Points: <span id="totalPoints">0</span> &nbsp;|&nbsp; Total Votes: <span id="totalVotes">0</span>
+</div>
+
+<div class="chart-wrap">
+  <canvas id="pointsChart" style="width:100%; height:100%;"></canvas>
+</div>
+
+<div class="chart-wrap">
+  <canvas id="growthChart" style="width:100%; height:100%;"></canvas>
+</div>
+
+<div class="hint">Vote more!</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+
+<script>
+const socket = io();
+
+const colorNames = ["red","blue","green","yellow","purple","orange","cyan","pink","white","black"];
+const colorLabels = colorNames.map(c => c.charAt(0).toUpperCase() + c.slice(1));
+
+const votes = new Array(colorNames.length).fill(0);
+const points = new Array(colorNames.length).fill(0);
+const lastClickTime = new Array(colorNames.length).fill(0);
+const COOLDOWN = 5*1000;
+
+const colorButtons = document.getElementById('colorButtons');
+const totalPointsEl = document.getElementById('totalPoints');
+const totalVotesEl = document.getElementById('totalVotes');
+
+const ctxPoints = document.getElementById('pointsChart').getContext('2d');
+const ctxGrowth = document.getElementById('growthChart').getContext('2d');
+
+const barColors = {
+  red: 'rgba(255, 64, 64, 0.90)',
+  blue: 'rgba(0, 112, 255, 0.92)',
+  green: 'rgba(0, 200, 83, 0.88)',
+  yellow: 'rgba(255, 214, 10, 0.95)',
+  purple: 'rgba(150, 50, 230, 0.88)',
+  orange: 'rgba(255, 140, 0, 0.90)',
+  cyan: 'rgba(0, 200, 200, 0.9)',
+  pink: 'rgba(255, 105, 180, 0.9)',
+  white: 'rgba(255,255,255,0.95)',
+  black: 'rgba(10,10,10,0.95)'
+};
+
+Chart.register(ChartDataLabels);
+
+// Create buttons
+colorNames.forEach((c,i)=>{
+  const btn = document.createElement('button');
+  btn.style.background = barColors[c] || c;
+  btn.textContent = colorLabels[i];
+
+  btn.addEventListener('click', ()=>{
+    const now = Date.now();
+    if(now - lastClickTime[i] >= COOLDOWN){
+      lastClickTime[i] = now;
+      socket.emit('vote', {index:i, delta:1});
+    }
+  });
+
+  btn.addEventListener('contextmenu', e=>{
+    e.preventDefault();
+    const now = Date.now();
+    if(now - lastClickTime[i] >= COOLDOWN){
+      lastClickTime[i] = now;
+      socket.emit('vote', {index:i, delta:-1});
+    }
+  });
+
+  colorButtons.appendChild(btn);
+});
+
+// Bar Chart
+const pointsChart = new Chart(ctxPoints,{
+  type:'bar',
+  data:{
+    labels: colorLabels.slice(),
+    datasets:[{
+      label:'Points',
+      data: points.slice(),
+      backgroundColor: colorNames.map(c=>barColors[c]),
+      borderRadius:6,
+      barThickness:28
+    }]
+  },
+  options:{
+    indexAxis:'y',
+    animation:false,
+    maintainAspectRatio:false,
+    responsive:true,
+    scales:{
+      x:{ beginAtZero:true, ticks:{color:'#ddd'}, grid:{color:'rgba(255,255,255,0.04)'} },
+      y:{ ticks:{color:'#ddd', font:{weight:700}}, grid:{display:false} }
+    },
+    plugins:{
+      legend:{display:false},
+      tooltip:{
+        callbacks:{
+          label:function(context){
+            const idx = context.dataIndex;
+            return `${points[idx]} (${votes[idx]})`;
+          }
+        }
+      },
+      datalabels:{
+        anchor:'end',
+        align:'right',
+        clamp:true,
+        color:'#fff',
+        formatter:function(value, ctx){
+          const idx = ctx.dataIndex;
+          return `${points[idx]} (${votes[idx]})`;
+        },
+        font:{weight:'700', size:12},
+        padding:6
+      }
+    }
+  }
+});
+
+// Growth line chart (no labels or fill)
+const growthData = {
+  labels: [],
+  datasets: colorNames.map((c,i)=>({
+    label: colorLabels[i],
+    data: [],
+    borderColor: barColors[c],
+    backgroundColor: 'transparent',
+    fill:false,
+    tension:0.3,
+    pointRadius:0
+  }))
+};
+
+const growthChart = new Chart(ctxGrowth,{
+  type:'line',
+  data:growthData,
+  options:{
+    animation:false,
+    maintainAspectRatio:false,
+    responsive:true,
+    plugins:{legend:{display:false}, datalabels:{display:false}},
+    scales:{x:{ticks:{color:'#ddd'},grid:{color:'rgba(255,255,255,0.04)'}}, y:{ticks:{color:'#ddd'},grid:{color:'rgba(255,255,255,0.04)'}}}
+  }
+});
+
+// Update charts
+function updateAll(){
+  const totalVotesVal = votes.reduce((a,b)=>a+b,0);
+  const totalPointsVal = points.reduce((a,b)=>a+b,0);
+  totalVotesEl.textContent = totalVotesVal;
+  totalPointsEl.textContent = totalPointsVal;
+
+  pointsChart.data.datasets[0].data = points;
+  const maxPoints = Math.max(...points.map(p=>Math.abs(p)));
+  pointsChart.options.scales.x.max = maxPoints > 0 ? maxPoints*1.225 : 10;
+  pointsChart.update('none');
+
+  const now = new Date();
+  const label = now.toLocaleTimeString().slice(3,8);
+  growthData.labels.push(label);
+  if(growthData.labels.length>3600) growthData.labels.shift();
+
+  growthData.datasets.forEach((ds,i)=>{
+    ds.data.push(points[i]);
+    if(ds.data.length>3600) ds.data.shift();
+  });
+  growthChart.update('none');
+}
+
+// Listen for server updates
+socket.on('update', data => {
+  data.votes.forEach((v,i)=>votes[i]=v);
+  data.points.forEach((p,i)=>points[i]=p);
+  updateAll();
+});
+
+updateAll();
+</script>
+</body>
+</html>
