@@ -146,6 +146,7 @@ colorNames.forEach((c,i)=>{
   btn.addEventListener("click", ()=>{
     if(Date.now() - lastClick[i] >= COOLDOWN){
       votes[i]++;
+      points[i]+=(votes[i]*3);
       lastClick[i] = Date.now();
       sendUpdate();
       updateAll();
@@ -156,6 +157,7 @@ colorNames.forEach((c,i)=>{
     e.preventDefault();
     if(Date.now() - lastClick[i] >= COOLDOWN){
       votes[i]--;
+      points[i]-=(votes[i]*3);
       lastClick[i] = Date.now();
       sendUpdate();
       updateAll();
