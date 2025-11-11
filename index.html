@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Color Battles! - Bosmium</title>
+
 <style>
   body {
     background: #111;
@@ -14,6 +15,7 @@
   }
   h1 { margin-bottom: 6px; }
   p.description { color: #ccc; margin: 4px 0 14px 0; }
+
   .colors {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
@@ -49,7 +51,7 @@
 <body>
 
 <h1>Color Vote Game</h1>
-<p class="description">Real-time voting / Global sync / Left-click = +vote, Right-click = -vote (5s cooldown)</p>
+<p class="description">Real-time voting • Global updates • Left click = +vote • Right click = -vote (5s cooldown)</p>
 
 <div class="colors" id="colorButtons"></div>
 
@@ -63,24 +65,17 @@
 </div>
 
 <div class="chart-wrap">
-  <canvas id="growthChart"></canvas>
+  <canvas id="ppmChart"></canvas>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
 <script>
-  
 Chart.register(ChartDataLabels);
-  
-/* ================================================
-   SOCKET.IO CONNECTION
-================================================ */
-
-const socket = io();
 
 /* ================================================
-   GAME CONFIG
+   SETTINGS
 ================================================ */
 
 const colorNames = ["red","blue","green","yellow","purple","orange","cyan","pink","white","black"];
@@ -101,90 +96,61 @@ const colors = {
 
 let votes = Array(10).fill(0);
 let points = Array(10).fill(0);
+let ppm = Array(10).fill(0);
 
 let lastClick = Array(10).fill(0);
 const COOLDOWN = 5000;
 
-/* For PPM graph */
-const history = colorNames.map(()=>[]);
-
-/* DOM references */
-const btnContainer = document.getElementById("colorButtons");
-const totalPointsEl = document.getElementById("totalPoints");
-const totalVotesEl = document.getElementById("totalVotes");
-
-/* ================================================
-   RECEIVE DATA FROM SERVER
-================================================ */
-
-socket.on("init", serverData => {
-  votes = serverData.votes;
-  points = serverData.points;
-  updateAll();
-});
-
-socket.on("sync", serverData => {
-  votes = serverData.votes;
-  points = serverData.points;
-  updateAll();
-});
-
-/* Send updated values to server */
-function sendUpdate(){
-  socket.emit("update", { votes, points });
-}
+const socket = io();
 
 /* ================================================
    BUTTONS
 ================================================ */
+
+const buttonBox = document.getElementById("colorButtons");
 
 colorNames.forEach((c,i)=>{
   const btn = document.createElement("button");
   btn.style.background = colors[c];
   btn.textContent = labels[i];
 
+  // LEFT CLICK (+vote)
   btn.addEventListener("click", ()=>{
     if(Date.now() - lastClick[i] >= COOLDOWN){
-      votes[i]++;
-      points[i]+=(Math.abs(votes[i]*3));
+      socket.emit("vote", { index: i, delta: +1 });
       lastClick[i] = Date.now();
-      sendUpdate();
-      updateAll();
     }
   });
 
+  // RIGHT CLICK (-vote)
   btn.addEventListener("contextmenu", e=>{
     e.preventDefault();
     if(Date.now() - lastClick[i] >= COOLDOWN){
-      votes[i]--;
-      points[i]-=(Math.abs(votes[i]*3));
+      socket.emit("vote", { index: i, delta: -1 });
       lastClick[i] = Date.now();
-      sendUpdate();
-      updateAll();
     }
   });
 
-  btnContainer.appendChild(btn);
+  buttonBox.appendChild(btn);
 });
 
 /* ================================================
    BAR CHART
 ================================================ */
 
-const pointsChart = new Chart(document.getElementById("pointsChart"), {
-  type: "bar",
-  data: {
+const pointsChart = new Chart(document.getElementById("pointsChart"),{
+  type:"bar",
+  data:{
     labels,
-    datasets: [{
+    datasets:[{
       data: points,
       backgroundColor: colorNames.map(c=>colors[c]),
       borderRadius: 6
     }]
   },
   options:{
-    indexAxis:"y",
-    animation:false,
-    maintainAspectRatio:false,
+    indexAxis: "y",
+    animation: false,
     scales:{
       x:{ beginAtZero:true, ticks:{color:"white"}},
       y:{ ticks:{color:"white"}}
@@ -195,30 +161,28 @@ const pointsChart = new Chart(document.getElementById("pointsChart"), {
         color:"#fff",
         anchor:"end",
         align:"right",
-        formatter:(value, ctx)=>{
+        formatter:(val, ctx)=>{
           const i = ctx.dataIndex;
           return `${points[i]} (${votes[i]})`;
-        },
-        font:{weight:"bold"}
+        }
       }
     }
   }
 });
 
 /* ================================================
-   PPM GROWTH CHART
+   PPM CHART (line)
 ================================================ */
 
-const growthChart = new Chart(document.getElementById("growthChart"), {
-  type: "line",
-  data: {
+const ppmChart = new Chart(document.getElementById("ppmChart"),{
+  type:"line",
+  data:{
     labels: [],
     datasets: colorNames.map((c,i)=>({
       label: labels[i],
       data: [],
       borderColor: colors[c],
       backgroundColor: "transparent",
-      fill: false,
       tension: 0.3,
       pointRadius: 0,
       borderWidth: 3
@@ -226,91 +190,65 @@ const growthChart = new Chart(document.getElementById("growthChart"), {
   },
   options:{
     animation:false,
-    maintainAspectRatio:false,
     plugins:{
       legend:{ display:false },
-      datalabels: { display: false }   // ✅ TURN OFF LABELS FOR THIS CHART
+      datalabels:{ display:false } // ✅ no labels on the line graph
     },
     scales:{
-      x:{ ticks:{color:"white"} },
-      y:{ ticks:{color:"white"} }
+      x:{ ticks:{color:"white"}},
+      y:{ ticks:{color:"white"}}
     }
   }
 });
 
 /* ================================================
-   UPDATE ALL VISUALS
+   SERVER UPDATE HANDLER
 ================================================ */
 
-function updateAll(){
-  totalPointsEl.textContent = points.reduce((a,b)=>a+b,0);
-  totalVotesEl.textContent = votes.reduce((a,b)=>a+b,0);
+socket.on("update", data => {
+  votes = data.votes;
+  points = data.points;
+  ppm = data.ppm ?? Array(10).fill(0);
+
+  updateVisuals();
+  updatePPMGraph();
+});
+
+/* ================================================
+   UPDATE BAR CHART + TOTALS
+================================================ */
+
+function updateVisuals(){
+  document.getElementById("totalPoints").textContent = points.reduce((a,b)=>a+b,0);
+  document.getElementById("totalVotes").textContent  = votes.reduce((a,b)=>a+b,0);
 
   pointsChart.data.datasets[0].data = points;
 
-  const maxAbs = Math.max(...points.map(v=>Math.abs(v))) || 10;
+  const maxAbs = Math.max(...points.map(n => Math.abs(n))) || 10;
   pointsChart.options.scales.x.max = maxAbs * 1.2;
 
   pointsChart.update("none");
 }
 
 /* ================================================
-   POINT GENERATION TICK
+   UPDATE PPM CHART FROM SERVER
 ================================================ */
 
-setInterval(()=>{
-  for(let i=0;i<10;i++){
-    const gain = Math.floor(Math.random()*(Math.abs(votes[i])+10));
-    points[i] += votes[i] >= 0 ? gain : -gain;
-  }
-  sendUpdate();
-  updatePPM();
-  updateAll();
-},1000);
+function updatePPMGraph(){
+  const time = new Date().toLocaleTimeString().slice(3, 8);
 
-/* ================================================
-   AUTO DECAY EVERY 20S
-================================================ */
+  ppmChart.data.labels.push(time);
+  if(ppmChart.data.labels.length > 3600)
+    ppmChart.data.labels.shift();
 
-setInterval(()=>{
-  for(let i=0;i<10;i++){
-    if(votes[i] > 0) votes[i]--;
-    else if(votes[i] < 0) votes[i]++;
-  }
-  sendUpdate();
-  updateAll();
-},20000);
-
-/* ================================================
-   UPDATE PPM GRAPH
-================================================ */
-
-function updatePPM(){
-  const time = new Date().toLocaleTimeString().slice(3,8);
-
-  growthChart.data.labels.push(time);
-  if(growthChart.data.labels.length > 3600)
-    growthChart.data.labels.shift();
-
-  growthChart.data.datasets.forEach((ds,i)=>{
-    history[i].push(points[i]);
-    if(history[i].length > 60) history[i].shift();
-
-    let ppm = 0;
-    if(history[i].length === 60){
-      ppm = points[i] - history[i][0];
-    }
-
-    ds.data.push(ppm);
+  ppmChart.data.datasets.forEach((ds,i)=>{
+    ds.data.push(ppm[i]);
     if(ds.data.length > 3600)
       ds.data.shift();
   });
 
-  growthChart.update("none");
+  ppmChart.update("none");
 }
-
-updateAll();
 </script>
 </body>
 </html>
-
