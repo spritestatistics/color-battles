@@ -6,48 +6,80 @@ const io = require("socket.io")(http, { cors: { origin: "*" } });
 
 const DATA_FILE = "data.json";
 
-// Load or create data file
+// Load or initialize data
 let data;
 try {
   data = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
 } catch {
-  data = { 
+  data = {
+    votes: Array(10).fill(0),
     points: Array(10).fill(0),
-    votes:  Array(10).fill(0)
+    ppmHistory: Array(10).fill(0).map(() => [])
   };
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-// Auto-save to file every 5 seconds
+app.use(express.static(__dirname));
+
+// On connect: send full game state
+io.on("connection", socket => {
+  socket.emit("update", data);
+
+  socket.on("vote", ({ index, delta }) => {
+    data.votes[index] += delta;
+    io.emit("update", data);
+  });
+});
+
+// SERVER-SIDE POINT GENERATION
+setInterval(() => {
+  for (let i = 0; i < 10; i++) {
+    const amount = Math.floor(Math.random() * (Math.abs(data.votes[i]) + 5));
+    data.points[i] += data.votes[i] >= 0 ? amount : -amount;
+  }
+}, 1000);
+
+// SERVER-SIDE DECAY
+setInterval(() => {
+  for (let i = 0; i < 10; i++) {
+    if (data.votes[i] > 0) data.votes[i]--;
+    else if (data.votes[i] < 0) data.votes[i]++;
+  }
+}, 20000);
+
+// ✅ SERVER-SIDE PPM TRACKING
+setInterval(() => {
+  for (let i = 0; i < 10; i++) {
+
+    // push current points into history
+    data.ppmHistory[i].push(data.points[i]);
+
+    // keep exactly 60 seconds of history
+    if (data.ppmHistory[i].length > 60)
+      data.ppmHistory[i].shift();
+
+    // calculate PPM
+    let ppm = 0;
+    if (data.ppmHistory[i].length === 60) {
+      ppm = data.points[i] - data.ppmHistory[i][0];
+    }
+
+    // attach ppm to data packet sent to client
+    data.ppm = data.ppm || Array(10).fill(0);
+    data.ppm[i] = ppm;
+  }
+
+  io.emit("update", data);
+
+}, 1000);
+
+// Save every 5 seconds
 setInterval(() => {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }, 5000);
 
-// Serve static files (your index.html)
-app.use(express.static(__dirname));
-
-io.on("connection", socket => {
-  console.log("✅ A user connected:", socket.id);
-
-  // Send current data to new user
-  socket.emit("init", data);
-
-  // When client updates votes or points
-  socket.on("update", updated => {
-    data.points = updated.points;
-    data.votes  = updated.votes;
-
-    // Broadcast to all clients
-    socket.broadcast.emit("sync", data);
-  });
-
-  socket.on("disconnect", () => {
-    console.log("❌ User disconnected:", socket.id);
-  });
-});
-
-// Start server
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
-  console.log("✅ Server running on port", PORT);
+  console.log("✅ SERVER RUNNING ON PORT", PORT);
 });
+
