@@ -68,6 +68,9 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+<script>
+Chart.register(ChartDataLabels);
 
 <script>
 /* ================================================
@@ -184,7 +187,19 @@ const pointsChart = new Chart(document.getElementById("pointsChart"), {
       x:{ beginAtZero:true, ticks:{color:"white"}},
       y:{ ticks:{color:"white"}}
     },
-    plugins:{ legend:{ display:false }}
+    plugins:{
+      legend:{ display:false },
+      datalabels:{
+        color:"#fff",
+        anchor:"end",
+        align:"right",
+        formatter:(value, ctx)=>{
+          const i = ctx.dataIndex;
+          return `${points[i]} (${votes[i]})`;
+        },
+        font:{weight:"bold"}
+      }
+    }
   }
 });
 
